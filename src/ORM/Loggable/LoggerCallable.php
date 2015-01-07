@@ -11,6 +11,7 @@
 
 namespace Knp\DoctrineBehaviors\ORM\Loggable;
 
+use Symfony\Component\DependencyInjection\Container;
 use Symfony\Component\HttpKernel\Log\LoggerInterface;
 
 /**
@@ -19,20 +20,20 @@ use Symfony\Component\HttpKernel\Log\LoggerInterface;
 class LoggerCallable
 {
     /**
-     * @var LoggerInterface
+     * @var Container
      */
-    private $logger;
+    private $container;
 
     /**
-     * @param LoggerInterface $logger
+     * @param Container $container
      */
-    public function __construct(LoggerInterface $logger)
+    public function __construct(Container $container)
     {
-        $this->logger = $logger;
+        $this->container = $container;
     }
 
     public function __invoke($message)
     {
-        $this->logger->debug($message);
+        $this->container->get('logger')->debug($message);
     }
 }

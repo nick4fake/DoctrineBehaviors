@@ -122,7 +122,7 @@ services:
     knp.doctrine_behaviors.loggable_subscriber.logger_callable:
         class:           "%knp.doctrine_behaviors.loggable_subscriber.logger_callable.class%"
         arguments:
-            - "@logger"
+            - "@service_container" # because of circular dep
         public:  false
 
     knp.doctrine_behaviors.geocodable_subscriber:
