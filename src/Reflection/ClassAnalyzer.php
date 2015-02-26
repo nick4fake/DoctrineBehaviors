@@ -21,9 +21,16 @@ class ClassAnalyzer
      * @param string $traitName
      * @param boolean $isRecursive
      */
-    public function hasTrait(\ReflectionClass $class, $traitName, $isRecursive = false)
+    public function hasTrait(\ReflectionClass $class, $traitName, $isRecursive = false, $deep = false)
     {
-        if (in_array($traitName, $class->getTraitNames())) {
+        $getTraits = function(\ReflectionClass $class) use (&$getTraits) {
+            $ret = [$class->name];
+            foreach($class->getTraits() as $trait){
+                $ret = array_merge($ret, $getTraits($trait));
+            }
+            return $ret;
+        };
+        if (!$deep && in_array($traitName, $class->getTraitNames()) || $deep && !$class->isTrait() && in_array($traitName, $getTraits($class))){
             return true;
         }
 
