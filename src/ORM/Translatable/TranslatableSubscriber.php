@@ -282,7 +282,7 @@ class TranslatableSubscriber extends AbstractSubscriber
      */
     private function isTranslatable(ClassMetadata $classMetadata, $isRecursive = false)
     {
-        return $this->getClassAnalyzer()->hasTrait($classMetadata->reflClass, $this->translatableTrait, $this->isRecursive);
+        return $this->getClassAnalyzer()->hasTrait($classMetadata->reflClass, $this->translatableTrait, $this->isRecursive, true);
     }
 
     /**
@@ -291,7 +291,7 @@ class TranslatableSubscriber extends AbstractSubscriber
      */
     private function isTranslation(ClassMetadata $classMetadata)
     {
-        return $this->getClassAnalyzer()->hasTrait($classMetadata->reflClass, $this->translationTrait, $this->isRecursive);
+        return $this->getClassAnalyzer()->hasTrait($classMetadata->reflClass, $this->translationTrait, $this->isRecursive, true);
     }
 
     public function postLoad(LifecycleEventArgs $eventArgs)

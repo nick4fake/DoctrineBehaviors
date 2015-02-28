@@ -14,7 +14,7 @@ namespace Knp\DoctrineBehaviors\Reflection;
 use Doctrine\Common\EventSubscriber;
 
 class ClassAnalyzer
-{   
+{
     /**
      * Return TRUE if the given object use the given trait, FALSE if not
      * @param ReflectionClass $class
@@ -69,7 +69,7 @@ class ClassAnalyzer
         if (false === $parentClass) {
             return false;
         }
-        
+
         return $this->hasProperty($parentClass, $propertyName);
     }
 }
