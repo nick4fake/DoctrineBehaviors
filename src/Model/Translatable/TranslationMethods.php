@@ -34,7 +34,7 @@ trait TranslationMethods
      */
     public static function getTranslatableEntityClass()
     {
-        return substr(__CLASS__, 0, -11);
+        return substr(static::class, 0, -11);
     }
 
     /**
