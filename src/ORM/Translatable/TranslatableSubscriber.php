@@ -34,15 +34,23 @@ use Doctrine\DBAL\Platforms;
  */
 class TranslatableSubscriber extends AbstractSubscriber
 {
+    const GET_CLASS_NAME_TRANSLATABLE_METHOD = 'getTranslatableEntityClass';
+    const GET_CLASS_NAME_TRANSLATION_METHOD = 'getTranslationEntityClass';
     private $currentLocaleCallable;
     private $translatableTrait;
     private $translationTrait;
     private $translatableFetchMode;
     private $translationFetchMode;
 
-    public function __construct(ClassAnalyzer $classAnalyzer, $isRecursive, callable $currentLocaleCallable = null,
-                                $translatableTrait, $translationTrait, $translatableFetchMode, $translationFetchMode)
-    {
+    public function __construct(
+        ClassAnalyzer $classAnalyzer,
+        $isRecursive,
+        callable $currentLocaleCallable = null,
+        $translatableTrait,
+        $translationTrait,
+        $translatableFetchMode,
+        $translationFetchMode
+    ) {
         parent::__construct($classAnalyzer, $isRecursive);
 
         $this->currentLocaleCallable = $currentLocaleCallable;
@@ -98,145 +106,182 @@ class TranslatableSubscriber extends AbstractSubscriber
             if ($idGenType == ClassMetadata::GENERATOR_TYPE_AUTO) {
                 if ($platform->prefersSequences()) {
                     $class->setIdGeneratorType(ClassMetadata::GENERATOR_TYPE_SEQUENCE);
-                } else if ($platform->prefersIdentityColumns()) {
-                    $class->setIdGeneratorType(ClassMetadata::GENERATOR_TYPE_IDENTITY);
                 } else {
-                    $class->setIdGeneratorType(ClassMetadata::GENERATOR_TYPE_TABLE);
+                    if ($platform->prefersIdentityColumns()) {
+                        $class->setIdGeneratorType(ClassMetadata::GENERATOR_TYPE_IDENTITY);
+                    } else {
+                        $class->setIdGeneratorType(ClassMetadata::GENERATOR_TYPE_TABLE);
+                    }
                 }
             }
 
             // Create & assign an appropriate ID generator instance
             switch ($class->generatorType) {
-            case ClassMetadata::GENERATOR_TYPE_IDENTITY:
-                // For PostgreSQL IDENTITY (SERIAL) we need a sequence name. It defaults to
-                // <table>_<column>_seq in PostgreSQL for SERIAL columns.
-                // Not pretty but necessary and the simplest solution that currently works.
-                $sequenceName = null;
-                $fieldName    = $class->identifier ? $class->getSingleIdentifierFieldName() : null;
+                case ClassMetadata::GENERATOR_TYPE_IDENTITY:
+                    // For PostgreSQL IDENTITY (SERIAL) we need a sequence name. It defaults to
+                    // <table>_<column>_seq in PostgreSQL for SERIAL columns.
+                    // Not pretty but necessary and the simplest solution that currently works.
+                    $sequenceName = null;
+                    $fieldName = $class->identifier ? $class->getSingleIdentifierFieldName() : null;
 
-                if ($platform instanceof Platforms\PostgreSQLPlatform) {
-                    $columnName     = $class->getSingleIdentifierColumnName();
-                    $quoted         = isset($class->fieldMappings[$fieldName]['quoted']) || isset($class->table['quoted']);
-                    $sequenceName   = $class->getTableName() . '_' . $columnName . '_seq';
-                    $definition     = array(
-                        'sequenceName' => $platform->fixSchemaElementName($sequenceName)
-                    );
+                    if ($platform instanceof Platforms\PostgreSQLPlatform) {
+                        $columnName = $class->getSingleIdentifierColumnName();
+                        $quoted = isset($class->fieldMappings[$fieldName]['quoted']) || isset($class->table['quoted']);
+                        $sequenceName = $class->getTableName() . '_' . $columnName . '_seq';
+                        $definition = [
+                            'sequenceName' => $platform->fixSchemaElementName($sequenceName),
+                        ];
 
-                    if ($quoted) {
-                        $definition['quoted'] = true;
+                        if ($quoted) {
+                            $definition['quoted'] = true;
+                        }
+
+                        $sequenceName = $em->getConfiguration()->getQuoteStrategy()->getSequenceName(
+                            $definition,
+                            $class,
+                            $platform
+                        );
                     }
 
-                    $sequenceName = $em->getConfiguration()->getQuoteStrategy()->getSequenceName($definition, $class, $platform);
-                }
+                    $generator = ($fieldName && $class->fieldMappings[$fieldName]['type'] === 'bigint')
+                        ? new BigIntegerIdentityGenerator($sequenceName)
+                        : new IdentityGenerator($sequenceName);
 
-                $generator = ($fieldName && $class->fieldMappings[$fieldName]['type'] === 'bigint')
-                    ? new BigIntegerIdentityGenerator($sequenceName)
-                    : new IdentityGenerator($sequenceName);
+                    $class->setIdGenerator($generator);
 
-                $class->setIdGenerator($generator);
+                    break;
 
-                break;
+                case ClassMetadata::GENERATOR_TYPE_SEQUENCE:
+                    // If there is no sequence definition yet, create a default definition
+                    $definition = $class->sequenceGeneratorDefinition;
 
-            case ClassMetadata::GENERATOR_TYPE_SEQUENCE:
-                // If there is no sequence definition yet, create a default definition
-                $definition = $class->sequenceGeneratorDefinition;
+                    if (!$definition) {
+                        $fieldName = $class->getSingleIdentifierFieldName();
+                        $columnName = $class->getSingleIdentifierColumnName();
+                        $quoted = isset($class->fieldMappings[$fieldName]['quoted']) || isset($class->table['quoted']);
+                        $sequenceName = $class->getTableName() . '_' . $columnName . '_seq';
+                        $definition = [
+                            'sequenceName'   => $platform->fixSchemaElementName($sequenceName),
+                            'allocationSize' => 1,
+                            'initialValue'   => 1,
+                        ];
 
-                if ( ! $definition) {
-                    $fieldName      = $class->getSingleIdentifierFieldName();
-                    $columnName     = $class->getSingleIdentifierColumnName();
-                    $quoted         = isset($class->fieldMappings[$fieldName]['quoted']) || isset($class->table['quoted']);
-                    $sequenceName   = $class->getTableName() . '_' . $columnName . '_seq';
-                    $definition     = array(
-                        'sequenceName'      => $platform->fixSchemaElementName($sequenceName),
-                        'allocationSize'    => 1,
-                        'initialValue'      => 1,
-                    );
+                        if ($quoted) {
+                            $definition['quoted'] = true;
+                        }
 
-                    if ($quoted) {
-                        $definition['quoted'] = true;
+                        $class->setSequenceGeneratorDefinition($definition);
                     }
 
-                    $class->setSequenceGeneratorDefinition($definition);
-                }
+                    $sequenceGenerator = new \Doctrine\ORM\Id\SequenceGenerator(
+                        $em->getConfiguration()->getQuoteStrategy()->getSequenceName($definition, $class, $platform),
+                        $definition['allocationSize']
+                    );
+                    $class->setIdGenerator($sequenceGenerator);
+                    break;
 
-                $sequenceGenerator = new \Doctrine\ORM\Id\SequenceGenerator(
-                    $em->getConfiguration()->getQuoteStrategy()->getSequenceName($definition, $class, $platform),
-                    $definition['allocationSize']
-                );
-                $class->setIdGenerator($sequenceGenerator);
-                break;
+                case ClassMetadata::GENERATOR_TYPE_NONE:
+                    $class->setIdGenerator(new \Doctrine\ORM\Id\AssignedGenerator());
+                    break;
 
-            case ClassMetadata::GENERATOR_TYPE_NONE:
-                $class->setIdGenerator(new \Doctrine\ORM\Id\AssignedGenerator());
-                break;
+                case ClassMetadata::GENERATOR_TYPE_UUID:
+                    $class->setIdGenerator(new \Doctrine\ORM\Id\UuidGenerator());
+                    break;
 
-            case ClassMetadata::GENERATOR_TYPE_UUID:
-                $class->setIdGenerator(new \Doctrine\ORM\Id\UuidGenerator());
-                break;
+                case ClassMetadata::GENERATOR_TYPE_TABLE:
+                    throw new ORMException("TableGenerator not yet implemented.");
+                    break;
 
-            case ClassMetadata::GENERATOR_TYPE_TABLE:
-                throw new ORMException("TableGenerator not yet implemented.");
-                break;
+                case ClassMetadata::GENERATOR_TYPE_CUSTOM:
+                    $definition = $class->customGeneratorDefinition;
+                    if (!class_exists($definition['class'])) {
+                        throw new ORMException(
+                            "Can't instantiate custom generator : " .
+                            $definition['class']
+                        );
+                    }
+                    $class->setIdGenerator(new $definition['class']);
+                    break;
 
-            case ClassMetadata::GENERATOR_TYPE_CUSTOM:
-                $definition = $class->customGeneratorDefinition;
-                if ( ! class_exists($definition['class'])) {
-                    throw new ORMException("Can't instantiate custom generator : " .
-                        $definition['class']);
-                }
-                $class->setIdGenerator(new $definition['class']);
-                break;
-
-            default:
-                throw new ORMException("Unknown generator type: " . $class->generatorType);
+                default:
+                    throw new ORMException("Unknown generator type: " . $class->generatorType);
             }
             /// END DOCTRINE COPY / PASTED code
         }
     }
 
+    /**
+     * @param ClassMetadata $classMetadata
+     */
     private function mapTranslatable(ClassMetadata $classMetadata)
     {
         if (!$classMetadata->hasAssociation('translations')) {
-            $classMetadata->mapOneToMany([
-                'fieldName'     => 'translations',
-                'mappedBy'      => 'translatable',
-                'indexBy'       => 'locale',
-                'cascade'       => ['persist', 'merge', 'remove'],
-                'fetch'         => $this->translatableFetchMode,
-                'targetEntity'  => $classMetadata->name.'Translation',
-                'orphanRemoval' => true
-            ]);
+            if (method_exists($classMetadata->name, static::GET_CLASS_NAME_TRANSLATION_METHOD)) {
+                $targetEntity = forward_static_call(
+                    [$classMetadata->name, static::GET_CLASS_NAME_TRANSLATION_METHOD],
+                    $classMetadata
+                );
+            } else {
+                $targetEntity = $classMetadata->name . 'Translation';
+            }
+            $classMetadata->mapOneToMany(
+                [
+                    'fieldName'     => 'translations',
+                    'mappedBy'      => 'translatable',
+                    'indexBy'       => 'locale',
+                    'cascade'       => ['persist', 'merge', 'remove'],
+                    'fetch'         => $this->translatableFetchMode,
+                    'targetEntity'  => $targetEntity,
+                    'orphanRemoval' => true,
+                ]
+            );
         }
     }
 
+    /**
+     * @param ClassMetadata $classMetadata
+     * @throws \Doctrine\ORM\Mapping\MappingException
+     */
     private function mapTranslation(ClassMetadata $classMetadata)
     {
         if (!$classMetadata->hasAssociation('translatable')) {
-            $classMetadata->mapManyToOne([
-                'fieldName'    => 'translatable',
-                'inversedBy'   => 'translations',
-                'fetch'         => $this->translationFetchMode,
-                'joinColumns'  => [[
-                    'name'                 => 'translatable_id',
-                    'referencedColumnName' => 'id',
-                    'onDelete'             => 'CASCADE'
-                ]],
-                'targetEntity' => substr($classMetadata->name, 0, -11)
-            ]);
+            if (method_exists($classMetadata->name, static::GET_CLASS_NAME_TRANSLATABLE_METHOD)) {
+                $targetEntity = forward_static_call(
+                    [$classMetadata->name, static::GET_CLASS_NAME_TRANSLATABLE_METHOD],
+                    $classMetadata
+                );
+            } else {
+                $targetEntity = substr($classMetadata->name, 0, -11);
+            }
+            $classMetadata->mapManyToOne(
+                [
+                    'fieldName'    => 'translatable',
+                    'inversedBy'   => 'translations',
+                    'fetch'        => $this->translationFetchMode,
+                    'joinColumns'  => [[
+                        'name'                 => 'translatable_id',
+                        'referencedColumnName' => 'id',
+                        'onDelete'             => 'CASCADE',
+                    ]],
+                    'targetEntity' => $targetEntity,
+                ]
+            );
         }
 
-        $name = $classMetadata->getTableName().'_unique_translation';
+        $name = $classMetadata->getTableName() . '_unique_translation';
         if (!$this->hasUniqueTranslationConstraint($classMetadata, $name)) {
             $classMetadata->table['uniqueConstraints'][$name] = [
-                'columns' => ['translatable_id', 'locale' ]
+                'columns' => ['translatable_id', 'locale'],
             ];
         }
 
         if (!$classMetadata->hasField('locale')) {
-            $classMetadata->mapField(array(
-                'fieldName' => 'locale',
-                'type'      => 'string'
-            ));
+            $classMetadata->mapField(
+                [
+                    'fieldName' => 'locale',
+                    'type'      => 'string',
+                ]
+            );
         }
 
     }
@@ -248,10 +293,13 @@ class TranslatableSubscriber extends AbstractSubscriber
      *
      * @return int
      */
-    private function convertFetchString($fetchMode){
-        if (is_int($fetchMode)) return $fetchMode;
+    private function convertFetchString($fetchMode)
+    {
+        if (is_int($fetchMode)) {
+            return $fetchMode;
+        }
 
-        switch($fetchMode){
+        switch ($fetchMode) {
             case "LAZY":
                 return ClassMetadataInfo::FETCH_LAZY;
             case "EAGER":
@@ -276,13 +324,18 @@ class TranslatableSubscriber extends AbstractSubscriber
      * Checks if entity is translatable
      *
      * @param ClassMetadata $classMetadata
-     * @param bool          $isRecursive   true to check for parent classes until found
+     * @param bool $isRecursive true to check for parent classes until found
      *
      * @return boolean
      */
     private function isTranslatable(ClassMetadata $classMetadata, $isRecursive = false)
     {
-        return $this->getClassAnalyzer()->hasTrait($classMetadata->reflClass, $this->translatableTrait, $this->isRecursive, true);
+        return $this->getClassAnalyzer()->hasTrait(
+            $classMetadata->reflClass,
+            $this->translatableTrait,
+            $this->isRecursive,
+            true
+        );
     }
 
     /**
@@ -291,13 +344,18 @@ class TranslatableSubscriber extends AbstractSubscriber
      */
     private function isTranslation(ClassMetadata $classMetadata)
     {
-        return $this->getClassAnalyzer()->hasTrait($classMetadata->reflClass, $this->translationTrait, $this->isRecursive, true);
+        return $this->getClassAnalyzer()->hasTrait(
+            $classMetadata->reflClass,
+            $this->translationTrait,
+            $this->isRecursive,
+            true
+        );
     }
 
     public function postLoad(LifecycleEventArgs $eventArgs)
     {
-        $em            = $eventArgs->getEntityManager();
-        $entity        = $eventArgs->getEntity();
+        $em = $eventArgs->getEntityManager();
+        $entity = $eventArgs->getEntity();
         $classMetadata = $em->getClassMetadata(get_class($entity));
 
         if (!$this->getClassAnalyzer()->hasMethod($classMetadata->reflClass, 'setCurrentLocale')) {

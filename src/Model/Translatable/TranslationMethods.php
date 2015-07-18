@@ -28,6 +28,16 @@ trait TranslationMethods
     }
 
     /**
+     * Returns translation entity class name.
+     * must be changed on both sides (owning and inverse)
+     * @return string
+     */
+    public static function getTranslatableEntityClass()
+    {
+        return substr(__CLASS__, 0, -11);
+    }
+
+    /**
      * Sets entity, that this translation should be mapped to.
      *
      * @param Translatable $translatable The translatable
