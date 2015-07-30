@@ -20,6 +20,9 @@ class CurrentLocaleCallable
     public function __invoke()
     {
         if (!$this->container->isScopeActive('request')) {
+            if ($this->container->hasParameter('locale')) {
+                return $this->container->getParameter('locale');
+            }
             return;
         }
 
